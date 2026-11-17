@@ -30,3 +30,6 @@ tools/store_zone_objects.py
 tools/scan_zones.py
 tools/dump_lua.py
 test/picker_test.lua
+
+# the README screenshot
+!docs/*.png

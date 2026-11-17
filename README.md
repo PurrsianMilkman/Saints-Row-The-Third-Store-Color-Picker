@@ -1,5 +1,7 @@
 # Saints Row: The Third - Store Colour Picker
 
+![The colour picker in Planet Saints: Hue, Saturation and Luminance sliders with colour bars, a Result swatch, and the suit previewed in the picked pink](docs/screenshot.png)
+
 A true-RGB colour picker for the clothing stores in **Saints Row: The Third (PC, DX11)**. Instead of
 the fixed swatch grid, every colour slot of a clothing item gets **Hue / Saturation / Luminance**
 sliders with colour bars, a live preview on your character and the exact colour you picked.
