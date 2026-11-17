@@ -60,6 +60,8 @@ their hashes.
 
 **Uninstall:** `install.ps1 -Uninstall` (restores the colour table; keeps `SR3StoreColors.ini`).
 
+Your support is greatly appreciated. Nothing is paywalled: https://www.patreon.com/cw/Purrsian
+
 ### Files it puts in the game folder
 
 | File | What |
