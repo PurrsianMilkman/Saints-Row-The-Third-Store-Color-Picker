@@ -41,6 +41,15 @@ Limits that follow from the one-byte index:
   their preset colours (the picker still works, snapping to the nearest of the 255 colours).
 - In the swatch grid, don't pick the last two swatches: they are the live slots.
 
+## With SR3 Mod UI (recommended)
+
+If [SR3 Mod UI](https://github.com/PurrsianMilkman/Saints-Row-The-Third-Mod-UI) is installed first, the picker needs **no replaced store file**: the
+script `SR3ModUI\mods\store_color_picker.lua` hooks the stock store menu at run time, the plugin talks to
+it through `ModUI.call("storecolors", ...)`, and **Pause > MODS > Store Colour Picker** shows whether true
+RGB is on, with a button that teleports you to a clothing store. `install.ps1` detects SR3 Mod UI, installs
+the script and removes the v0.1 `store_clothing.str2_pc` / `patch_vint_doc_containers.asm_pc` if they are
+the ones this tool built. Without SR3 Mod UI everything works as in v0.1.
+
 ## Install
 
 Requirements: the **DX11** executable (`SaintsRowTheThird_DX11.exe`), an **ASI loader**

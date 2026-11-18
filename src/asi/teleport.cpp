@@ -13,6 +13,7 @@
 //   0x009E1740(human, &pos, &orient3x3, 1, 1, exit_vehicle, id16 = 0x006F50B0(human, 4, 0), 1, 1, 0)
 // Landing points are each store's floor-level entrance navpoint (tools/store_navs.py).
 #include "common.h"
+#include "sr3modui.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdarg>
@@ -140,8 +141,16 @@ void teleportTo(int si) {
     g_verifyStore = si;
 }
 
+volatile LONG g_tpRequest = 0;    // set by the MODS page button (UI thread), served here (script thread)
+
+void __cdecl onTeleportButton(const char*, const char*, double, void*) { InterlockedExchange(&g_tpRequest, 1); }
+
 void tick() {
     if (++g_ticks == 1) logf("first @tick from sr3_city.lua: the script thread is running");
+    if (InterlockedExchange(&g_tpRequest, 0)) {
+        void* h = localPlayer(); float p[3];
+        if (h && playerPos(h, p)) { logf("MODS button: teleport to the nearest clothing store"); teleportTo(nearestStore(p)); }
+    }
     if (g_verifyIn > 0 && --g_verifyIn == 0) {
         float p[3];
         void* h = localPlayer();
@@ -199,6 +208,10 @@ void installTeleport() {
     }
     if (!patchImm(REG_FN_IMM, ORIG_HANDLER, (uintptr_t)&teleportToObjectWrapper)) { logf("SKIP teleport: patch failed"); return; }
     logf("OK teleport: teleport_to_object routed through the wrapper (F7 nearest clothing store, Shift+F7 next store)");
+    if (SR3ModUI_Load()) {   // a button on the picker's page in Pause > MODS (the page itself comes from its script)
+        ModUI.AddButton("store_color_picker", "teleport", "Teleport to a clothing store", onTeleportButton, nullptr);
+        logf("OK teleport: button added to the SR3 Mod UI page");
+    }
 }
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {

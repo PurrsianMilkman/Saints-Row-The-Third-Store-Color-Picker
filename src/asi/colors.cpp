@@ -23,6 +23,7 @@
 // live/keep -> pool index (number); failures -> a string ("nopool", "full", "badcmd"). Without this
 // ASI debug_print returns nothing and the store script falls back to the nearest pool colour.
 #include "common.h"
+#include "sr3modui.h"     // SR3 Mod UI (optional at run time; copy of SR3-ModUI/include/sr3modui.h)
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -145,12 +146,12 @@ DWORD WINAPI watcher(LPVOID) {
 
 float clamp255(double v) { return v < 0 ? 0.f : v > 255 ? 255.f : (float)v; }
 
-int colorCommand(void* L, int n) {
-    const char* cmd = lua_tolstr(L, 2, nullptr);
-    char out[64] = "nopool";
-    int num = -1;                  // >= 0: answer with this number instead of the string
-    float rgb[3] = { 0, 0, 0 };
-    if (n >= 5) for (int c = 0; c < 3; c++) rgb[c] = clamp255(lua_tonum(L, 3 + c));
+// One command from the store script: hello | live r g b | keep r g b (table units 0..255).
+// Returns the answer number (>= 0) or -1 with a failure string in out.
+int colorCore(const char* cmd, bool haveRgb, float rgb[3], char out[64]) {
+    strcpy(out, "nopool");
+    int num = -1;
+    int n = haveRgb ? 5 : 2;
     EnterCriticalSection(&g_cs);
     if (cmd && discover()) {
         if (!strcmp(cmd, "hello")) {
@@ -188,9 +189,29 @@ int colorCommand(void* L, int n) {
     }
     LeaveCriticalSection(&g_cs);
     static int calls = 0;
-    if (++calls <= 3 || (cmd && strcmp(cmd, "live"))) logf("colors: @cp %s -> %s", cmd ? cmd : "(nil)", out);
+    if (++calls <= 3 || (cmd && strcmp(cmd, "live"))) logf("colors: %s -> %s", cmd ? cmd : "(nil)", out);
+    return num;
+}
+
+int colorCommand(void* L, int n) {   // debug_print("@cp", cmd, r, g, b) channel (no SR3 Mod UI)
+    const char* cmd = lua_tolstr(L, 2, nullptr);
+    char out[64];
+    float rgb[3] = { 0, 0, 0 };
+    if (n >= 5) for (int c = 0; c < 3; c++) rgb[c] = clamp255(lua_tonum(L, 3 + c));
+    int num = colorCore(cmd, n >= 5, rgb, out);
     if (num >= 0) lua_pushnum(L, num); else lua_pushstr(L, out);
     return 1;
+}
+
+// SR3 Mod UI handler: ModUI.call("storecolors", cmd, r, g, b)
+void __cdecl modUiHandler(SR3ModUI_Call* c, void*) {
+    const char* cmd = ModUI.ArgString(c, 1);
+    char out[64];
+    float rgb[3] = { 0, 0, 0 };
+    int n = ModUI.ArgCount(c);
+    if (n >= 4) for (int k = 0; k < 3; k++) rgb[k] = clamp255(ModUI.ArgNumber(c, 2 + k));
+    int num = colorCore(cmd, n >= 4, rgb, out);
+    if (num >= 0) ModUI.ReturnNumber(c, num); else ModUI.ReturnString(c, out);
 }
 
 int __cdecl debugPrintWrapper(void* L) {
@@ -207,6 +228,11 @@ int __cdecl debugPrintWrapper(void* L) {
 void installColors() {
     InitializeCriticalSection(&g_cs);
     strcpy(g_ini, gameDir()); strcat(g_ini, "SR3StoreColors.ini");
+    if (SR3ModUI_Load() && ModUI.RegisterHandler("storecolors", modUiHandler, nullptr)) {
+        CreateThread(nullptr, 0, watcher, nullptr, 0, nullptr);
+        logf("OK colors: SR3 Mod UI found - store script talks to us through ModUI.call(\"storecolors\"); watcher started");
+        return;
+    }
     const char* nm = (const char*)DBG_NAME_STR;
     if (!readable((void*)DBG_NAME_IMM, 4) || *(uintptr_t*)DBG_NAME_IMM != DBG_NAME_STR || !readable(nm, 12) ||
         strcmp(nm, "debug_print") || !patchImm(DBG_FN_IMM, DBG_ORIG, (uintptr_t)&debugPrintWrapper)) {
