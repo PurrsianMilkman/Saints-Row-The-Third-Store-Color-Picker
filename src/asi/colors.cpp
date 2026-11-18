@@ -16,14 +16,13 @@
 // name id, +0x0C authored RGB, +0x18 player RGB, +0x24 ped RGB (floats, xtbl value / 255 - checked in
 // game: WHITE reads 1.0). We write all three triples.
 //
-// Channel from the store UI: debug_print is registered in the interface Lua state and is a no-op in
-// the retail build (0x007AE590: lua_gettop, return 0). Its function pointer is the imm32 at 0x00E7DC6C.
-// The wrapper answers debug_print("@cp", cmd, r, g, b) and forwards everything else. Colours cross as
-// table units (0..255 floats, stored /255). Answers: hello -> free custom slots (number),
+// Channel from the store UI (SR3 Mod UI is required): the script SR3ModUI\mods\store_color_picker.lua
+// calls ModUI.call("storecolors", cmd, r, g, b) and SR3 Mod UI runs our handler on the UI thread. Colours
+// cross as table units (0..255 floats, stored /255). Answers: hello -> free custom slots (number),
 // live/keep -> pool index (number); failures -> a string ("nopool", "full", "badcmd"). Without this
-// ASI debug_print returns nothing and the store script falls back to the nearest pool colour.
+// ASI the call returns nothing and the store script falls back to the nearest pool colour.
 #include "common.h"
-#include "sr3modui.h"     // SR3 Mod UI (optional at run time; copy of SR3-ModUI/include/sr3modui.h)
+#include "sr3modui.h"     // SR3 Mod UI (required; copy of the header from the SR3 Mod UI repo)
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -33,10 +32,6 @@ namespace {
 
 const uintptr_t POOL_COUNT    = 0x0495AB48;
 const uintptr_t POOL_RECS     = 0x0495AB58;
-const uintptr_t DBG_NAME_IMM  = 0x00E7DC64;   // "mov [esp+34h], 125B218h" ("debug_print")
-const uintptr_t DBG_NAME_STR  = 0x0125B218;
-const uintptr_t DBG_FN_IMM    = 0x00E7DC6C;   // "mov [esp+38h], 7AE590h"
-const uintptr_t DBG_ORIG      = 0x007AE590;
 const int REC = 0x30;
 const int MAXI = 256;
 
@@ -193,16 +188,6 @@ int colorCore(const char* cmd, bool haveRgb, float rgb[3], char out[64]) {
     return num;
 }
 
-int colorCommand(void* L, int n) {   // debug_print("@cp", cmd, r, g, b) channel (no SR3 Mod UI)
-    const char* cmd = lua_tolstr(L, 2, nullptr);
-    char out[64];
-    float rgb[3] = { 0, 0, 0 };
-    if (n >= 5) for (int c = 0; c < 3; c++) rgb[c] = clamp255(lua_tonum(L, 3 + c));
-    int num = colorCore(cmd, n >= 5, rgb, out);
-    if (num >= 0) lua_pushnum(L, num); else lua_pushstr(L, out);
-    return 1;
-}
-
 // SR3 Mod UI handler: ModUI.call("storecolors", cmd, r, g, b)
 void __cdecl modUiHandler(SR3ModUI_Call* c, void*) {
     const char* cmd = ModUI.ArgString(c, 1);
@@ -214,31 +199,16 @@ void __cdecl modUiHandler(SR3ModUI_Call* c, void*) {
     if (num >= 0) ModUI.ReturnNumber(c, num); else ModUI.ReturnString(c, out);
 }
 
-int __cdecl debugPrintWrapper(void* L) {
-    int n = lua_gettop(L);
-    if (n >= 2) {
-        const char* tag = lua_tolstr(L, 1, nullptr);
-        if (tag && !strcmp(tag, "@cp")) return colorCommand(L, n);
-    }
-    return ((lua_fn_t)DBG_ORIG)(L);
-}
-
 }  // namespace
 
 void installColors() {
     InitializeCriticalSection(&g_cs);
     strcpy(g_ini, gameDir()); strcat(g_ini, "SR3StoreColors.ini");
-    if (SR3ModUI_Load() && ModUI.RegisterHandler("storecolors", modUiHandler, nullptr)) {
-        CreateThread(nullptr, 0, watcher, nullptr, 0, nullptr);
-        logf("OK colors: SR3 Mod UI found - store script talks to us through ModUI.call(\"storecolors\"); watcher started");
-        return;
-    }
-    const char* nm = (const char*)DBG_NAME_STR;
-    if (!readable((void*)DBG_NAME_IMM, 4) || *(uintptr_t*)DBG_NAME_IMM != DBG_NAME_STR || !readable(nm, 12) ||
-        strcmp(nm, "debug_print") || !patchImm(DBG_FN_IMM, DBG_ORIG, (uintptr_t)&debugPrintWrapper)) {
-        logf("SKIP colors: debug_print registration bytes differ - true RGB disabled (picker will snap to presets)");
+    if (!SR3ModUI_Load() || !ModUI.RegisterHandler("storecolors", modUiHandler, nullptr)) {
+        logf("SKIP colors: SR3 Mod UI (SR3ModUI.asi) is not installed - the picker needs it: "
+             "https://github.com/PurrsianMilkman/Saints-Row-The-Third-Mod-UI");
         return;
     }
     CreateThread(nullptr, 0, watcher, nullptr, 0, nullptr);
-    logf("OK colors: debug_print routed through the colour wrapper; watcher started");
+    logf("OK colors: SR3 Mod UI found - store script talks to us through ModUI.call(\"storecolors\"); watcher started");
 }
