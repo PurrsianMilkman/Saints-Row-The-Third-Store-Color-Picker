@@ -2,22 +2,26 @@
 
     python tools/build_mod.py "C:/Games/Saints Row 3"      -> writes mod/
 
-Reads (never writes) the game folder:
-  packfiles/pc/cache/patch_uncompressed.vpp_pc   store_clothing.str2_pc, patch_vint_doc_containers.asm_pc
+    python tools/build_mod.py --v01 "C:/Games/Saints Row 3"
+        exit 0 if the game folder holds the v0.1 store files (a loose store_clothing.str2_pc with the
+        old built-in picker); install.ps1 then removes them, because they would replace the SR3 Mod UI
+        picker with the v0.1 one.
+
+The picker's UI is SR3 Mod UI (src/modui/store_color_picker.lua hooks the stock store at run time), so
+no store file is rebuilt. Reads (never writes) the game folder:
   packfiles/pc/cache/misc.vpp_pc                 sr3_city.lua
   character_color_pool.xtbl (loose, if another mod installed one) else misc_tables.vpp_pc's copy
 If backup/character_color_pool.xtbl.installed-before exists (install.ps1 makes it before first
 overwriting the loose pool) that is the source instead, so rebuilding never stacks colours twice.
 
-Writes mod/: character_color_pool.xtbl (+palette_report.txt), store_clothing.lua,
-store_clothing.str2_pc, patch_vint_doc_containers.asm_pc, sr3_city.lua.
+Writes mod/: character_color_pool.xtbl (+palette_report.txt), sr3_city.lua.
 """
 import os, sys, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from srvpp import Pack
-import build_str2, gen_palette
+import build_str2, gen_palette   # build_str2: only read_str2, to recognise the v0.1 files
 
 
 def pack_file(path, name):
@@ -27,16 +31,6 @@ def pack_file(path, name):
         if n.lower() == name.lower():
             return blob
     raise SystemExit(f'{name} not found in {path}')
-
-
-def patch_store_lua(src):
-    old = b"\t\t\t\t\tcolor = c[i],\r\n\t\t\t\t\ton_select = store_clothing_color_select,\r\n"
-    new = (b"\t\t\t\t\tcolor = c[i],\r\n\t\t\t\t\ton_sub_menu_fill = store_clothing_hsl_fill,"
-           b"\t-- [StoreColorPicker] was on_select = store_clothing_color_select\r\n")
-    if src.count(old) != 1:
-        raise SystemExit('store_clothing.lua: colour-row anchor not found (unexpected game version)')
-    add = open(os.path.join(ROOT, 'src', 'hsl_picker.lua'), 'rb').read().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
-    return src.replace(old, new) + add
 
 
 def patch_city_lua(src):
@@ -65,12 +59,7 @@ def main(game):
     tmp = os.path.join(out, 'orig')
     os.makedirs(tmp, exist_ok=True)
 
-    # originals from the player's own packs
-    str2 = pack_file(os.path.join(cache, 'patch_uncompressed.vpp_pc'), 'store_clothing.str2_pc')
-    asm = pack_file(os.path.join(cache, 'patch_uncompressed.vpp_pc'), 'patch_vint_doc_containers.asm_pc')
     city = pack_file(os.path.join(cache, 'misc.vpp_pc'), 'sr3_city.lua')
-    for n, b in (('store_clothing.str2_pc', str2), ('patch_vint_doc_containers.asm_pc', asm)):
-        open(os.path.join(tmp, n), 'wb').write(b)
 
     # colour pool source: backup of the pre-mod loose pool > loose pool > packed pool
     backup = os.path.join(ROOT, 'backup', 'character_color_pool.xtbl.installed-before')
@@ -86,21 +75,28 @@ def main(game):
     print(f'colour pool: {why}')
     gen_palette.main(pool_src, os.path.join(out, 'character_color_pool.xtbl'), os.path.join(out, 'palette_report.txt'))
 
-    # scripts
-    _, files = build_str2.read_str2(str2)
-    lua = patch_store_lua(dict(files)['store_clothing.lua'])
-    open(os.path.join(out, 'store_clothing.lua'), 'wb').write(lua)
     open(os.path.join(out, 'sr3_city.lua'), 'wb').write(patch_city_lua(city))
-    build_str2.main(os.path.join(tmp, 'store_clothing.str2_pc'), os.path.join(tmp, 'patch_vint_doc_containers.asm_pc'),
-                    os.path.join(out, 'store_clothing.lua'), os.path.join(out, 'store_clothing.str2_pc'),
-                    os.path.join(out, 'patch_vint_doc_containers.asm_pc'))
 
-    for n in ('character_color_pool.xtbl', 'store_clothing.str2_pc', 'patch_vint_doc_containers.asm_pc', 'sr3_city.lua'):
+    for n in ('character_color_pool.xtbl', 'sr3_city.lua'):
         h = hashlib.sha256(open(os.path.join(out, n), 'rb').read()).hexdigest()[:16].upper()
         print(f'  mod/{n:34} {h}')
 
 
+def is_v01_store(game):
+    """True if the game folder's loose store_clothing.str2_pc carries the v0.1 built-in picker."""
+    path = os.path.join(game, 'store_clothing.str2_pc')
+    if not os.path.exists(path):
+        return False
+    try:
+        _, files = build_str2.read_str2(open(path, 'rb').read())
+    except Exception:
+        return False
+    return b'store_clothing_hsl_fill' in dict(files).get('store_clothing.lua', b'')
+
+
 if __name__ == '__main__':
+    if len(sys.argv) == 3 and sys.argv[1] == '--v01':
+        sys.exit(0 if is_v01_store(sys.argv[2]) else 1)
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
     main(sys.argv[1])
